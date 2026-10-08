@@ -1,12 +1,13 @@
 import mongoose from 'mongoose';
+import { randomUUID } from 'node:crypto';
 
 const reservaSchema = new mongoose.Schema({
   pousadaId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pousada', required: true, index: true },
-  codigo: { type: String, required: true, unique: true, uppercase: true, trim: true },
+  codigo: { type: String, required: true, unique: true, uppercase: true, trim: true, default: () => `RES-${randomUUID().toUpperCase()}` },
   hospede: {
     nome: { type: String, required: true, trim: true },
-    email: { type: String, required: true, lowercase: true, trim: true },
-    telefone: { type: String, required: true, trim: true }
+    email: { type: String, lowercase: true, trim: true },
+    telefone: { type: String, trim: true }
   },
   acomodacao: { type: mongoose.Schema.Types.ObjectId, ref: 'Acomodacao', required: true, index: true },
   checkin: { type: Date, required: true, index: true },
@@ -27,7 +28,7 @@ const reservaSchema = new mongoose.Schema({
 });
 
 reservaSchema.index({ pousadaId: 1, acomodacao: 1, checkin: 1, checkout: 1 });
-reservaSchema.index({ pousadaId: 1, codigoExterno: 1 });
+reservaSchema.index({ pousadaId: 1, canal: 1, codigoExterno: 1 }, { unique: true, partialFilterExpression: { codigoExterno: { $type: 'string' } } });
 reservaSchema.pre('save', function(next) {
   this.updatedAt = new Date();
   if (!this.codigo) {

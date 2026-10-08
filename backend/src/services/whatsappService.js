@@ -1,21 +1,18 @@
 import twilio from 'twilio';
 import { Pousada } from '../models/index.js';
 
-const client = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
-
 export const enviarWhatsApp = async (pousadaId, mensagem) => {
   try {
+    if (process.env.WHATSAPP_ENABLED !== 'true' || !process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) return false;
     const pousada = await Pousada.findById(pousadaId);
-    if (!pousada || !pousada.whatsapp) {
+    if (!pousada || !pousada.whatsapp || !pousada.whatsappAtivo) {
       console.warn('Pousada sem WhatsApp configurado:', pousadaId);
       return false;
     }
 
     const to = pousada.whatsapp.startsWith('whatsapp:') ? pousada.whatsapp : `whatsapp:${pousada.whatsapp}`;
 
+    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     await client.messages.create({
       from: process.env.TWILIO_WHATSAPP_FROM,
       to,

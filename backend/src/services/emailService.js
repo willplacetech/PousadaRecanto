@@ -1,396 +1,123 @@
-import OpenAI from 'openai';
 import mongoose from 'mongoose';
 import { EmailReserva, Reserva, Bloqueio, Acomodacao, Alerta, Pousada } from '../models/index.js';
-import { enviarWhatsApp } from './whatsappService.js';
+import { extrairDadosReserva, selecionarAcomodacao } from './emailExtraction.js';
+import { normalizarDia, gerarDatasPeriodo } from './datas.js';
+import { detectarOverbooking } from './reservaService.js';
+export { extrairDadosReserva } from './emailExtraction.js';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
-
-const PROMPT_EXTRACAO = `
-Extraia informações de reserva do e-mail abaixo. Retorne APENAS JSON válido.
-
-Campos a extrair:
-- plataforma: "airbnb" | "booking" | "expedia" | "outro"
-- tipo: "nova" | "alteracao" | "cancelamento"
-- codigoExterno: string (código da reserva na plataforma)
-- nomeHospede: string
-- checkin: "YYYY-MM-DD"
-- checkout: "YYYY-MM-DD"
-- nomeAcomodacao: string (nome do quarto/listing)
-- numHospedes: number
-- valorTotal: number (opcional)
-
-Se não conseguir extrair com confiança, retorne: {"erro": "Não foi possível extrair dados da reserva"}
-
-E-mail:
----
-`;
-
-export const extrairDadosReserva = async (corpoEmail, assunto, remetente) => {
+const marcarFalha = async (email, erro) => {
+  email.erroExtracao = erro; email.processado = false; await email.save();
+  await Alerta.findOneAndUpdate({ pousadaId: email.pousadaId, chave: `email:${email._id}` }, { $set: { tipo: 'email_nao_processado', severidade: 'media', mensagem: `Revise o e-mail: ${email.assunto}. ${erro}`, detalhes: { emailId: email._id }, resolvido: false } }, { upsert: true, runValidators: true });
+  return { sucesso: false, erro };
+};
+export const processarEmailReserva = async email => {
+  if (email.processado) return { sucesso: true, acao: 'duplicada', reserva: email.reservaId };
+  const { dadosExtraidos: dados, erro } = await extrairDadosReserva(email.corpo || '', email.assunto, email.remetente);
+  if (erro || !dados) return marcarFalha(email, erro || 'Extração inválida');
+  const session = await mongoose.startSession();
+  let resultado;
   try {
-    const plataforma = detectarPlataforma(remetente, assunto);
-    
-    const response = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: 'Você é um especialista em extrair dados de reservas de e-mails de plataformas de hospedagem. Retorne apenas JSON.' },
-        { role: 'user', content: PROMPT_EXTRACAO + `\nAssunto: ${assunto}\nRemetente: ${remetente}\nCorpo:\n${corpoEmail}` }
-      ],
-      temperature: 0,
-      max_tokens: 500,
-      response_format: { type: 'json_object' }
+    email.dadosExtraidos = dados; email.extraido = true; email.tipo = dados.tipo;
+    await session.withTransaction(async () => {
+      let reserva = await Reserva.findOne({ pousadaId: email.pousadaId, canal: dados.plataforma, codigoExterno: dados.codigoExterno }).session(session);
+      if (dados.tipo === 'nova' && reserva) { resultado = { reserva, acao: 'duplicada' }; return; }
+      if (dados.tipo !== 'nova' && !reserva) throw new Error('Reserva não encontrada para alteração/cancelamento');
+      if (reserva?.status === 'checkout') throw new Error('Reserva encerrada; revise manualmente a notificação');
+      if (dados.tipo === 'cancelamento') {
+        await Acomodacao.updateOne({ _id: reserva.acomodacao, pousadaId: email.pousadaId }, { $inc: { versaoDisponibilidade: 1 } }, { session });
+        reserva.status = 'cancelada'; await reserva.save({ session });
+        await Bloqueio.deleteMany({ pousadaId: email.pousadaId, referenciaId: reserva._id, origem: { $in: ['email','reserva'] } }).session(session);
+        resultado = { reserva, acao: 'cancelada' }; return;
+      }
+      const quartos = await Acomodacao.find({ pousadaId: email.pousadaId, status: 'ativa' }).session(session).lean();
+      const quarto = selecionarAcomodacao(quartos, dados.nomeAcomodacao);
+      if (!quarto) throw new Error('Acomodação ausente ou ambígua; revise manualmente');
+      if ((dados.numHospedes || reserva?.numHospedes) > quarto.maxHospedes) throw new Error('Reserva externa excede capacidade; revise manualmente');
+      // All booking writers lock the room to serialize availability changes.
+      const ids = [...new Set([String(quarto._id), ...(reserva ? [String(reserva.acomodacao)] : [])])].sort();
+      for (const id of ids) await Acomodacao.updateOne({ _id: id, pousadaId: email.pousadaId }, { $inc: { versaoDisponibilidade: 1 } }, { session });
+      const checkin = normalizarDia(dados.checkin), checkout = normalizarDia(dados.checkout);
+      const datas = gerarDatasPeriodo(checkin, checkout);
+      if (!reserva) reserva = new Reserva({ pousadaId: email.pousadaId, acomodacao: quarto._id, hospede: { nome: dados.nomeHospede }, numHospedes: dados.numHospedes, canal: dados.plataforma, codigoExterno: dados.codigoExterno, origem: 'email', emailId: email._id, valorTotal: dados.valorTotal ?? 0 });
+      else {
+        if (reserva.status === 'cancelada') throw new Error('Reserva já cancelada; revise a alteração');
+        await Bloqueio.deleteMany({ pousadaId: email.pousadaId, referenciaId: reserva._id, origem: { $in: ['reserva','email'] } }).session(session);
+        reserva.acomodacao = quarto._id;
+        if (dados.nomeHospede) reserva.hospede.nome = dados.nomeHospede;
+        if (dados.numHospedes) reserva.numHospedes = dados.numHospedes;
+        if (dados.valorTotal !== undefined) reserva.valorTotal = dados.valorTotal;
+      }
+      reserva.checkin = checkin; reserva.checkout = checkout;
+      if (dados.tipo === 'nova') reserva.status = 'confirmada';
+      await reserva.save({ session });
+      // The same externally identified booking can already exist in the iCal snapshot.
+      await Bloqueio.deleteMany({ pousadaId: email.pousadaId, acomodacao: quarto._id, origem: 'ical', canal: dados.plataforma, codigoExterno: dados.codigoExterno, data: { $gte: checkin, $lt: checkout } }).session(session);
+      await Bloqueio.insertMany(datas.map(data => ({ pousadaId: email.pousadaId, acomodacao: quarto._id, data, origem: 'email', referenciaId: reserva._id, canal: dados.plataforma, codigoExterno: dados.codigoExterno, hash: `${reserva._id}:${data.toISOString().slice(0,10)}` })), { session });
+      resultado = { reserva, acao: dados.tipo === 'nova' ? 'criada' : 'alterada' };
     });
-
-    const resultado = JSON.parse(response.choices[0].message.content);
-    return { ...resultado, plataforma: resultado.plataforma || plataforma };
-  } catch (error) {
-    console.error('Erro na extração LLM:', error);
-    return { erro: 'Erro ao processar com IA' };
-  }
-};
-
-const detectarPlataforma = (remetente, assunto) => {
-  const texto = `${remetente} ${assunto}`.toLowerCase();
-  if (texto.includes('airbnb')) return 'airbnb';
-  if (texto.includes('booking')) return 'booking';
-  if (texto.includes('expedia')) return 'expedia';
-  return 'outro';
-};
-
-const encontrarAcomodacaoPorNome = async (pousadaId, nomeBusca) => {
-  const acomodacoes = await Acomodacao.find({ pousadaId, status: 'ativa' }).select('nome').lean();
-  
-  const normalizado = nomeBusca.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  
-  for (const a of acomodacoes) {
-    const nomeNormalizado = a.nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    if (nomeNormalizado.includes(normalizado) || normalizado.includes(nomeNormalizado)) {
-      return a;
-    }
-  }
-  
-  return acomodacoes[0] || null;
-};
-
-const gerarHashBloqueio = (pousadaId, acomodacaoId, data, origem, referenciaId) => {
-  const str = `${pousadaId}-${acomodacaoId}-${data.toISOString().split('T')[0]}-${origem}-${referenciaId || ''}`;
-  return Buffer.from(str).toString('base64url');
-};
-
-const gerarDatasPeriodo = (checkin, checkout) => {
-  const datas = [];
-  const inicio = new Date(checkin);
-  const fim = new Date(checkout);
-  for (let d = new Date(inicio); d < fim; d.setDate(d.getDate() + 1)) {
-    datas.push(new Date(d));
-  }
-  return datas;
-};
-
-export const processarEmailReserva = async (emailDoc) => {
-  const { dadosExtraidos, erro } = await extrairDadosReserva(
-    emailDoc.corpo || '',
-    emailDoc.assunto,
-    emailDoc.remetente
-  );
-
-  if (erro) {
-    emailDoc.erroExtracao = erro;
-    emailDoc.extraido = false;
-    await emailDoc.save();
-
-    await Alerta.create({
-      pousadaId: emailDoc.pousadaId,
-      tipo: 'email_nao_processado',
-      severidade: 'media',
-      mensagem: `E-mail não processado automaticamente: ${emailDoc.assunto} (${emailDoc.remetente})`,
-      detalhes: { emailId: emailDoc._id, erro }
-    });
-    return { sucesso: false, erro };
-  }
-
-  emailDoc.dadosExtraidos = dadosExtraidos;
-  emailDoc.extraido = true;
-  emailDoc.tipo = dadosExtraidos.tipo;
-
-  const acomodacao = await encontrarAcomodacaoPorNome(emailDoc.pousadaId, dadosExtraidos.nomeAcomodacao);
-  if (!acomodacao) {
-    emailDoc.erroExtracao = 'Acomodação não encontrada';
-    await emailDoc.save();
-    return { sucesso: false, erro: 'Acomodação não encontrada' };
-  }
-
-  try {
-    let resultado;
-    switch (dadosExtraidos.tipo) {
-      case 'nova':
-        resultado = await processarNovaReserva(emailDoc, dadosExtraidos, acomodacao);
-        break;
-      case 'cancelamento':
-        resultado = await processarCancelamento(emailDoc, dadosExtraidos, acomodacao);
-        break;
-      case 'alteracao':
-        resultado = await processarAlteracao(emailDoc, dadosExtraidos, acomodacao);
-        break;
-      default:
-        throw new Error('Tipo de reserva desconhecido');
-    }
-
-    emailDoc.reservaId = resultado.reserva?._id;
-    emailDoc.processado = true;
-    await emailDoc.save();
-
+    email.reservaId = resultado.reserva._id; email.processado = true; email.erroExtracao = undefined; await email.save();
+    await Alerta.updateMany({ pousadaId: email.pousadaId, chave: `email:${email._id}` }, { resolvido: true, resolvidoEm: new Date() });
+    await detectarOverbooking(email.pousadaId);
     return { sucesso: true, ...resultado };
-  } catch (error) {
-    emailDoc.erroExtracao = error.message;
-    await emailDoc.save();
-    return { sucesso: false, erro: error.message };
-  }
+  } catch (e) { return marcarFalha(email, e.message); }
+  finally { await session.endSession(); }
 };
 
-const processarNovaReserva = async (emailDoc, dados, acomodacao) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const checkin = new Date(dados.checkin);
-    const checkout = new Date(dados.checkout);
-
-    const bloqueiosExistentes = await Bloqueio.find({
-      pousadaId: emailDoc.pousadaId,
-      acomodacao: acomodacao._id,
-      data: { $gte: checkin, $lt: checkout }
-    }).session(session);
-
-    if (bloqueiosExistentes.length > 0) {
-      const reservaConflito = await Reserva.findById(bloqueiosExistentes[0].referenciaId)
-        .select('codigo hospede.nome canal').session(session);
-      
-      const msg = `🚨 OVERBOOKING VIA E-MAIL 🚨\n\n` +
-        `Acomodação: ${acomodacao.nome}\n` +
-        `Período: ${dados.checkin} a ${dados.checkout}\n` +
-        `E-mail: ${emailDoc.remetente} (${dados.plataforma})\n` +
-        `Hóspede: ${dados.nomeHospede}\n` +
-        `Conflita com: ${reservaConflito?.codigo} (${reservaConflito?.canal}) - ${reservaConflito?.hospede?.nome}`;
-      
-      await Alerta.create({
-        pousadaId: emailDoc.pousadaId,
-        tipo: 'overbooking',
-        severidade: 'critica',
-        mensagem: msg,
-        detalhes: { acomodacao: acomodacao._id, checkin, checkout, emailId: emailDoc._id }
-      });
-      await enviarWhatsApp(emailDoc.pousadaId, msg);
-    }
-
-    const reserva = new Reserva({
-      pousadaId: emailDoc.pousadaId,
-      hospede: {
-        nome: dados.nomeHospede,
-        email: '',
-        telefone: ''
-      },
-      acomodacao: acomodacao._id,
-      checkin,
-      checkout,
-      numHospedes: dados.numHospedes || 1,
-      valorTotal: dados.valorTotal || 0,
-      canal: dados.plataforma,
-      status: 'confirmada',
-      codigoExterno: dados.codigoExterno,
-      origem: 'email',
-      emailId: emailDoc._id
-    });
-    await reserva.save({ session });
-
-    const datas = gerarDatasPeriodo(checkin, checkout);
-    const bloqueios = datas.map(data => ({
-      pousadaId: emailDoc.pousadaId,
-      acomodacao: acomodacao._id,
-      data,
-      origem: 'email',
-      referenciaId: reserva._id,
-      hash: gerarHashBloqueio(emailDoc.pousadaId, acomodacao._id, data, 'email', reserva._id)
-    }));
-    await Bloqueio.insertMany(bloqueios, { session, ordered: false });
-
-    await session.commitTransaction();
-    return { reserva, acao: 'criada' };
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
-  } finally {
-    await session.endSession();
-  }
-};
-
-const processarCancelamento = async (emailDoc, dados, acomodacao) => {
-  const reserva = await Reserva.findOne({
-    pousadaId: emailDoc.pousadaId,
-    codigoExterno: dados.codigoExterno,
-    status: { $ne: 'cancelada' }
-  });
-
-  if (!reserva) {
-    throw new Error(`Reserva ${dados.codigoExterno} não encontrada para cancelamento`);
-  }
-
-  reserva.status = 'cancelada';
-  await reserva.save();
-
-  await Bloqueio.deleteMany({
-    pousadaId: emailDoc.pousadaId,
-    referenciaId: reserva._id,
-    origem: { $in: ['reserva', 'email'] }
-  });
-
-  return { reserva, acao: 'cancelada' };
-};
-
-const processarAlteracao = async (emailDoc, dados, acomodacao) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const reserva = await Reserva.findOne({
-      pousadaId: emailDoc.pousadaId,
-      codigoExterno: dados.codigoExterno,
-      status: { $ne: 'cancelada' }
-    }).session(session);
-
-    if (!reserva) {
-      throw new Error(`Reserva ${dados.codigoExterno} não encontrada para alteração`);
-    }
-
-    await Bloqueio.deleteMany({
-      pousadaId: emailDoc.pousadaId,
-      referenciaId: reserva._id,
-      origem: { $in: ['reserva', 'email'] }
-    }).session(session);
-
-    const checkin = new Date(dados.checkin);
-    const checkout = new Date(dados.checkout);
-    
-    reserva.checkin = checkin;
-    reserva.checkout = checkout;
-    reserva.numHospedes = dados.numHospedes || reserva.numHospedes;
-    reserva.valorTotal = dados.valorTotal || reserva.valorTotal;
-    await reserva.save({ session });
-
-    const datas = gerarDatasPeriodo(checkin, checkout);
-    const bloqueios = datas.map(data => ({
-      pousadaId: emailDoc.pousadaId,
-      acomodacao: acomodacao._id,
-      data,
-      origem: 'email',
-      referenciaId: reserva._id,
-      hash: gerarHashBloqueio(emailDoc.pousadaId, acomodacao._id, data, 'email', reserva._id)
-    }));
-    await Bloqueio.insertMany(bloqueios, { session, ordered: false });
-
-    await session.commitTransaction();
-    return { reserva, acao: 'alterada' };
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
-  } finally {
-    await session.endSession();
-  }
-};
-
-export const sincronizarEmails = async (pousadaId) => {
-  const imap = (await import('imap')).default;
+const emAndamento = new Map();
+const callbackPromise = fn => new Promise((resolve, reject) => fn((err, data) => err ? reject(err) : resolve(data)));
+export const selecionarUids = (uids, cursor, limite = 100) => uids.filter(uid => uid > cursor).sort((a,b) => a-b).slice(0,limite);
+async function syncImap(pousadaId) {
+  const { default: Imap } = await import('imap');
   const { simpleParser } = await import('mailparser');
-  
-  const pousada = await Pousada.findById(pousadaId);
-  if (!pousada || !pousada.imapConfig?.user) {
-    return { processados: 0, erro: 'Configuração IMAP não encontrada' };
-  }
-
-  return new Promise((resolve, reject) => {
-    const conn = new imap({
-      host: pousada.imapConfig.host,
-      port: pousada.imapConfig.port,
-      user: pousada.imapConfig.user,
-      password: pousada.imapConfig.pass,
-      tls: true,
-      tlsOptions: { rejectUnauthorized: false }
-    });
-
-    conn.once('ready', () => {
-      conn.openBox('INBOX', false, async (err, box) => {
-        if (err) return reject(err);
-
-        const criterio = [
-          'UNSEEN',
-          ['OR', ['FROM', '@airbnb.com'], ['FROM', '@booking.com'], ['FROM', '@expedia.com']]
-        ];
-
-        conn.search(criterio, async (err, uids) => {
-          if (err) return reject(err);
-          if (!uids || uids.length === 0) {
-            conn.end();
-            return resolve({ processados: 0 });
-          }
-
-          const fetch = conn.fetch(uids, { bodies: '', markSeen: true });
-          let processados = 0;
-
-          fetch.on('message', (msg) => {
-            msg.on('body', async (stream) => {
-              const parsed = await simpleParser(stream);
-              
-              const emailDoc = await EmailReserva.findOneAndUpdate(
-                { messageId: parsed.messageId },
-                {
-                  pousadaId,
-                  messageId: parsed.messageId,
-                  remetente: parsed.from?.text || '',
-                  assunto: parsed.subject || '',
-                  dataRecebido: parsed.date || new Date(),
-                  tipo: 'desconhecido',
-                  corpo: parsed.text || parsed.html || ''
-                },
-                { upsert: true, new: true }
-              );
-
-              if (!emailDoc.processado) {
-                await processarEmailReserva(emailDoc);
-                processados++;
-              }
-            });
-          });
-
-          fetch.once('end', () => {
-            conn.end();
-            resolve({ processados });
-          });
-
-          fetch.once('error', (err) => {
-            conn.end();
-            reject(err);
-          });
-        });
+  const p = await Pousada.findById(pousadaId).select('+imapConfig.pass');
+  if (!p?.imapConfig?.ativo) return { processados: 0, desativado: true };
+  if (!p.imapConfig.user || !p.imapConfig.pass) throw new Error('Credenciais IMAP não configuradas');
+  const conn = new Imap({ host: p.imapConfig.host, port: p.imapConfig.port, user: p.imapConfig.user, password: p.imapConfig.pass, tls: true, connTimeout: 15000, authTimeout: 15000, socketTimeout: 60000, tlsOptions: { rejectUnauthorized: true } });
+  let connectionError;
+  conn.on('error', e => { connectionError = e; });
+  try {
+    await new Promise((resolve, reject) => { conn.once('ready', resolve); conn.once('error', reject); conn.connect(); });
+    const box = await callbackPromise(cb => conn.openBox('INBOX', false, cb));
+    const validity = String(box.uidvalidity);
+    const cursor = p.imapConfig.uidValidity === validity ? p.imapConfig.ultimoUid || 0 : 0;
+    const uids = await callbackPromise(cb => conn.search(['UNSEEN', ['OR', ['FROM','airbnb.com'], ['OR', ['FROM','booking.com'], ['FROM','expedia.com']]]], cb));
+    let processados = 0, falhos = 0;
+    for (const uid of selecionarUids(uids || [], cursor)) {
+      if (connectionError) throw connectionError;
+      const raw = await new Promise((resolve, reject) => {
+        const chunks = []; let length = 0;
+        const f = conn.fetch(uid, { bodies: '', markSeen: false });
+        f.on('message', msg => msg.on('body', stream => { stream.on('data', chunk => { length += chunk.length; if (length > 2 * 1024 * 1024) { reject(new Error('Email excede limite de 2 MB')); conn.end(); } else chunks.push(chunk); }); stream.on('error', reject); }));
+        f.once('error', reject); f.once('end', () => resolve(Buffer.concat(chunks)));
       });
-    });
-
-    conn.once('error', (err) => reject(err));
-    conn.connect();
-  });
+      const parsed = await simpleParser(raw, { skipHtmlToText: false, skipImageLinks: true });
+      const from = parsed.from?.value?.[0]?.address || '';
+      if (!/@(?:[\w-]+\.)*(?:airbnb|booking|expedia)\.com$/i.test(from)) {
+        await Pousada.updateOne({ _id: pousadaId }, { $set: { 'imapConfig.uidValidity': validity, 'imapConfig.ultimoUid': uid } }); continue;
+      }
+      const messageId = parsed.messageId || `imap:${validity}:${uid}`;
+      const email = await EmailReserva.findOneAndUpdate({ pousadaId, messageId }, { $setOnInsert: { pousadaId, messageId, remetente: from, assunto: parsed.subject || '(sem assunto)', dataRecebido: parsed.date || new Date(), corpo: (parsed.text || '').slice(0,80000), tipo: 'desconhecido' } }, { upsert: true, new: true, runValidators: true }).select('+corpo');
+      const result = await processarEmailReserva(email);
+      // Failed extraction is durably available for review; do not starve newer mail.
+      await Pousada.updateOne({ _id: pousadaId }, { $set: { 'imapConfig.uidValidity': validity, 'imapConfig.ultimoUid': uid } });
+      if (result.sucesso) { await callbackPromise(cb => conn.addFlags(uid, '\\Seen', cb)); processados++; }
+      else falhos++;
+    }
+    return { processados, falhos };
+  } finally { conn.end(); }
+}
+export const sincronizarEmails = pousadaId => {
+  const key = String(pousadaId);
+  if (emAndamento.has(key)) return emAndamento.get(key);
+  const p = syncImap(pousadaId).finally(() => emAndamento.delete(key));
+  emAndamento.set(key, p); return p;
 };
-
 export const sincronizarEmailsTodas = async () => {
-  const pousadas = await Pousada.find({ ativo: true, 'imapConfig.user': { $exists: true } }).select('_id');
-  
+  const pousadas = await Pousada.find({ ativo: true, 'imapConfig.ativo': true }).select('_id');
   const resultados = [];
   for (const p of pousadas) {
-    try {
-      const result = await sincronizarEmails(p._id);
-      resultados.push({ pousadaId: p._id, ...result, sucesso: true });
-    } catch (error) {
-      resultados.push({ pousadaId: p._id, erro: error.message, sucesso: false });
-    }
+    try { resultados.push({ pousadaId: p._id, ...await sincronizarEmails(p._id), sucesso: true }); }
+    catch (e) { resultados.push({ pousadaId: p._id, sucesso: false, erro: e.message }); }
   }
   return resultados;
 };

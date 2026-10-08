@@ -11,6 +11,7 @@ const calendarioICalSchema = new mongoose.Schema({
   status: { type: String, enum: ['ativo', 'inativo', 'erro'], default: 'ativo' },
   ultimoErro: { type: String },
   tentativasErro: { type: Number, default: 0 },
+  sincronizacaoVersao: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });

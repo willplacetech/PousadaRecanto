@@ -13,6 +13,7 @@ import Reservation from "./components/Reservation";
 import LocationSection from "./components/LocationSection";
 import Footer from "./components/Footer";
 import WhatsAppFab from "./components/WhatsAppFab";
+import Painel from "./painel/Painel";
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -82,9 +83,12 @@ function Landing() {
 }
 
 export default function App() {
+  useEffect(() => {
+    if ('serviceWorker' in navigator && import.meta.env.PROD) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }, []);
   return (
     <ErrorBoundary>
-      <Landing />
+      {window.location.pathname === '/painel' || window.location.pathname.startsWith('/painel/') ? <Painel /> : <Landing />}
     </ErrorBoundary>
   );
 }

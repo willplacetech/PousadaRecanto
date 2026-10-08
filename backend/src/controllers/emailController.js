@@ -1,4 +1,4 @@
-import { EmailReserva, Alerta } from '../models/index.js';
+import { EmailReserva } from '../models/index.js';
 import { sincronizarEmails, sincronizarEmailsTodas } from '../services/emailService.js';
 
 export const listarEmails = async (req, res) => {
@@ -32,20 +32,19 @@ export const buscarEmail = async (req, res) => {
 
 export const reprocessarEmail = async (req, res) => {
   try {
-    const email = await EmailReserva.findOne({ _id: req.params.id, pousadaId: req.pousadaId });
+    const email = await EmailReserva.findOne({ _id: req.params.id, pousadaId: req.pousadaId }).select('+corpo');
     if (!email) {
       return res.status(404).json({ erro: 'E-mail não encontrado' });
     }
 
     email.processado = false;
     email.erroExtracao = null;
-    email.reservaId = null;
     await email.save();
 
     const { processarEmailReserva } = await import('../services/emailService.js');
     const resultado = await processarEmailReserva(email);
 
-    res.json({ email, resultado });
+    res.json({ resultado, processado: email.processado });
   } catch (error) {
     console.error('Erro ao reprocessar e-mail:', error);
     res.status(500).json({ erro: 'Erro interno do servidor' });
@@ -54,10 +53,6 @@ export const reprocessarEmail = async (req, res) => {
 
 export const sincronizarEmail = async (req, res) => {
   try {
-    const { secret } = req.query;
-    if (secret !== process.env.CRON_SECRET) {
-      return res.status(403).json({ erro: 'Segredo inválido' });
-    }
 
     const { pousadaId } = req.body;
     if (!pousadaId) {
@@ -74,10 +69,6 @@ export const sincronizarEmail = async (req, res) => {
 
 export const sincronizarEmailTodas = async (req, res) => {
   try {
-    const { secret } = req.query;
-    if (secret !== process.env.CRON_SECRET) {
-      return res.status(403).json({ erro: 'Segredo inválido' });
-    }
 
     const resultados = await sincronizarEmailsTodas();
     res.json({ resultados, timestamp: new Date() });
@@ -100,6 +91,7 @@ export const configEmail = async (req, res) => {
       port: pousada.imapConfig?.port,
       user: pousada.imapConfig?.user,
       configured: !!pousada.imapConfig?.user
+      ,ativo: !!pousada.imapConfig?.ativo
     });
   } catch (error) {
     console.error('Erro ao buscar config e-mail:', error);
@@ -110,15 +102,13 @@ export const configEmail = async (req, res) => {
 export const atualizarConfigEmail = async (req, res) => {
   try {
     const { Pousada } = await import('../models/index.js');
-    const { host, port, user, pass } = req.body;
-
-    const pousada = await Pousada.findByIdAndUpdate(
-      req.pousadaId,
-      { imapConfig: { host, port, user, pass } },
-      { new: true }
-    );
-
-    res.json({ configured: true });
+    const { host, port, user, pass, ativo } = req.body;
+    const anterior = await Pousada.findById(req.pousadaId);
+    const update = { 'imapConfig.host': host, 'imapConfig.port': port, 'imapConfig.user': user, 'imapConfig.ativo': ativo ?? true };
+    if (anterior?.imapConfig?.user !== user || anterior?.imapConfig?.host !== host) { update['imapConfig.ultimoUid'] = 0; update['imapConfig.uidValidity'] = ''; }
+    if (pass) update['imapConfig.pass'] = pass;
+    const pousada = await Pousada.findByIdAndUpdate(req.pousadaId, { $set: update }, { new: true, runValidators: true });
+    res.json({ configured: !!pousada?.imapConfig?.user, ativo: pousada?.imapConfig?.ativo });
   } catch (error) {
     console.error('Erro ao atualizar config e-mail:', error);
     res.status(500).json({ erro: 'Erro interno do servidor' });

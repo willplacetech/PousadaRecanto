@@ -6,6 +6,9 @@ const bloqueioSchema = new mongoose.Schema({
   data: { type: Date, required: true, index: true },
   origem: { type: String, enum: ['reserva', 'ical', 'email', 'manutencao'], required: true, index: true },
   referenciaId: { type: mongoose.Schema.Types.ObjectId, index: true },
+  canal: { type: String },
+  codigoExterno: { type: String },
+  uidExterno: { type: String },
   hash: { type: String, required: true, index: true },
   createdAt: { type: Date, default: Date.now }
 });

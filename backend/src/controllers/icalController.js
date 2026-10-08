@@ -1,5 +1,6 @@
 import { Pousada, Acomodacao, CalendarioICal, Bloqueio } from '../models/index.js';
-import { gerarICal, importarICal, sincronizarTodosICal } from '../services/icalService.js';
+import { gerarICal, sincronizarTodosICal } from '../services/icalService.js';
+import { validateCalendarUrl } from '../services/icalEvents.js';
 
 export const exportarICal = async (req, res) => {
   try {
@@ -43,6 +44,7 @@ export const listarCalendariosICal = async (req, res) => {
 export const criarCalendarioICal = async (req, res) => {
   try {
     const { acomodacao, canal, url } = req.body;
+    validateCalendarUrl(url);
 
     const acomodacaoDoc = await Acomodacao.findOne({ _id: acomodacao, pousadaId: req.pousadaId });
     if (!acomodacaoDoc) {
@@ -72,6 +74,11 @@ export const criarCalendarioICal = async (req, res) => {
 
 export const atualizarCalendarioICal = async (req, res) => {
   try {
+    validateCalendarUrl(req.body.url);
+    const quarto = await Acomodacao.exists({ _id: req.body.acomodacao, pousadaId: req.pousadaId });
+    if (!quarto) return res.status(404).json({ erro: 'Acomodação não encontrada' });
+    const atual = await CalendarioICal.findOne({ _id: req.params.id, pousadaId: req.pousadaId });
+    if (atual && (String(atual.acomodacao) !== req.body.acomodacao || atual.canal !== req.body.canal)) return res.status(400).json({ erro: 'Para mudar acomodação ou canal, exclua este calendário e adicione outro. Isso preserva os bloqueios até a próxima sincronização.' });
     const cal = await CalendarioICal.findOneAndUpdate(
       { _id: req.params.id, pousadaId: req.pousadaId },
       req.body,
@@ -83,7 +90,7 @@ export const atualizarCalendarioICal = async (req, res) => {
     res.json(cal);
   } catch (error) {
     console.error('Erro ao atualizar calendário iCal:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    res.status(400).json({ erro: error.message });
   }
 };
 
@@ -103,10 +110,6 @@ export const excluirCalendarioICal = async (req, res) => {
 
 export const sincronizarICal = async (req, res) => {
   try {
-    const { secret } = req.query;
-    if (secret !== process.env.CRON_SECRET) {
-      return res.status(403).json({ erro: 'Segredo inválido' });
-    }
 
     const { pousadaId } = req.body;
     if (!pousadaId) {
@@ -123,10 +126,6 @@ export const sincronizarICal = async (req, res) => {
 
 export const sincronizarICalTodas = async (req, res) => {
   try {
-    const { secret } = req.query;
-    if (secret !== process.env.CRON_SECRET) {
-      return res.status(403).json({ erro: 'Segredo inválido' });
-    }
 
     const { Pousada } = await import('../models/index.js');
     const pousadas = await Pousada.find({ ativo: true }).select('_id');
@@ -148,7 +147,7 @@ export const statusSincronia = async (req, res) => {
   try {
     const calendarios = await CalendarioICal.find({ pousadaId: req.pousadaId })
       .populate('acomodacao', 'nome')
-      .select('canal url ultimaSincronizacao status ultimoErro tentativasErro');
+      .select('acomodacao canal url ultimaSincronizacao status ultimoErro tentativasErro');
 
     const agora = new Date();
     const status = calendarios.map(c => ({

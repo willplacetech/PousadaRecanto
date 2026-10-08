@@ -3,9 +3,10 @@ import bcrypt from 'bcryptjs';
 
 const usuarioSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  nome: { type: String, trim: true },
   senhaHash: { type: String, required: true },
   pousadaId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pousada', required: true },
-  role: { type: String, enum: ['dono', 'gestor'], default: 'gestor' },
+  role: { type: String, enum: ['dono', 'gestor', 'gerente', 'visualizacao'], default: 'gestor' },
   primeiroAcesso: { type: Boolean, default: true },
   ativo: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now },

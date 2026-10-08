@@ -1,6 +1,5 @@
 import { Router } from 'express';
-import { authMiddleware } from '../middleware/auth.js';
-import { multiTenant, ensurePousadaId } from '../middleware/multiTenant.js';
+import { ensurePousadaId } from '../middleware/multiTenant.js';
 import { validar, schemas } from '../middleware/validacao.js';
 import {
   listarAcomodacoes,
@@ -17,7 +16,7 @@ import {
 
 const router = Router();
 
-router.use(authMiddleware, multiTenant);
+
 
 router.get('/acomodacoes', listarAcomodacoes);
 router.get('/acomodacoes/:id', buscarAcomodacao);

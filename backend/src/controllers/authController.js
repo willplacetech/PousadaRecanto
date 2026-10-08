@@ -3,7 +3,7 @@ import { Usuario } from '../models/index.js';
 
 const gerarToken = (usuario) => {
   return jwt.sign(
-    { id: usuario._id, email: usuario.email, role: usuario.role, pousadaId: usuario.pousadaId },
+    { id: usuario._id, role: usuario.role, pousadaId: String(usuario.pousadaId._id || usuario.pousadaId) },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );

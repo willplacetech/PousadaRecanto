@@ -1,6 +1,5 @@
 import { Router } from 'express';
-import { authMiddleware } from '../middleware/auth.js';
-import { multiTenant, ensurePousadaId } from '../middleware/multiTenant.js';
+import { ensurePousadaId } from '../middleware/multiTenant.js';
 import { validar, schemas } from '../middleware/validacao.js';
 import {
   getDisponibilidade,
@@ -16,9 +15,9 @@ import {
 
 const router = Router();
 
-router.use(authMiddleware, multiTenant);
 
-router.get('/disponibilidade', validar(schemas.disponibilidade), getDisponibilidade);
+
+router.get('/disponibilidade', validar(schemas.disponibilidade, 'query'), getDisponibilidade);
 router.post('/reservas', ensurePousadaId, validar(schemas.reserva), criarReservaController);
 router.get('/reservas', listarReservasController);
 router.get('/reservas/calendario', getCalendario);
@@ -26,6 +25,6 @@ router.get('/reservas/overbooking', checkOverbooking);
 router.get('/reservas/bloqueios-pendentes', listarBloqueiosPendentes);
 router.get('/reservas/:id', buscarReserva);
 router.patch('/reservas/:id/status', ensurePousadaId, validar(schemas.reservaStatus), atualizarStatusReservaController);
-router.patch('/reservas/:id/bloqueio-manual', ensurePousadaId, confirmarBloqueioManual);
+router.patch('/reservas/:id/bloqueio-manual', ensurePousadaId, validar(schemas.bloqueioManual), confirmarBloqueioManual);
 
 export default router;

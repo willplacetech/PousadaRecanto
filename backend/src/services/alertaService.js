@@ -1,6 +1,7 @@
-import { Alerta, CalendarioICal, EmailReserva, Pousada, Reserva } from '../models/index.js';
+import { Alerta, CalendarioICal, EmailReserva, Reserva } from '../models/index.js';
 import { enviarWhatsApp } from './whatsappService.js';
 import { detectarOverbooking } from './reservaService.js';
+import { hojeSaoPaulo } from './datas.js';
 
 export const verificarSaudeSincronia = async (pousadaId) => {
   const agora = new Date();
@@ -33,6 +34,8 @@ export const verificarSaudeSincronia = async (pousadaId) => {
         await enviarWhatsApp(pousadaId, msg);
         alertas.push({ tipo: 'saude_sincronia', calendario: cal._id });
       }
+    } else {
+      await Alerta.updateMany({ pousadaId, tipo: 'saude_sincronia', 'detalhes.calendarioId': cal._id, resolvido: false }, { resolvido: true, resolvidoEm: agora });
     }
   }
 
@@ -176,10 +179,6 @@ export const resolverAlerta = async (req, res) => {
 
 export const sincronizarSaude = async (req, res) => {
   try {
-    const { secret } = req.query;
-    if (secret !== process.env.CRON_SECRET) {
-      return res.status(403).json({ erro: 'Segredo inválido' });
-    }
 
     const { pousadaId } = req.body;
     if (pousadaId) {
@@ -202,13 +201,11 @@ export const statsDashboard = async (req, res) => {
       Alerta.countDocuments({ pousadaId: req.pousadaId, resolvido: false }),
       CalendarioICal.find({ pousadaId: req.pousadaId, status: { $ne: 'inativo' } })
         .populate('acomodacao', 'nome')
-        .select('canal ultimaSincronizacao status ultimoErro'),
+        .select('acomodacao canal ultimaSincronizacao status ultimoErro'),
       EmailReserva.countDocuments({ pousadaId: req.pousadaId, processado: false }),
       (async () => {
-        const hoje = new Date();
-        hoje.setHours(0,0,0,0);
-        const amanha = new Date(hoje);
-        amanha.setDate(amanha.getDate() + 1);
+        const hoje = hojeSaoPaulo();
+        const amanha = new Date(+hoje + 86400000);
         return (await import('../models/index.js')).Reserva.countDocuments({
           pousadaId: req.pousadaId,
           status: { $in: ['pendente', 'confirmada'] },

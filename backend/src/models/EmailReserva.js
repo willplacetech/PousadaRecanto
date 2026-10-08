@@ -2,7 +2,8 @@ import mongoose from 'mongoose';
 
 const emailReservaSchema = new mongoose.Schema({
   pousadaId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pousada', required: true, index: true },
-  messageId: { type: String, required: true, unique: true },
+  messageId: { type: String, required: true },
+  corpo: { type: String, select: false },
   remetente: { type: String, required: true },
   assunto: { type: String, required: true },
   dataRecebido: { type: Date, default: Date.now, index: true },
@@ -17,5 +18,6 @@ const emailReservaSchema = new mongoose.Schema({
 
 emailReservaSchema.index({ pousadaId: 1, dataRecebido: -1 });
 emailReservaSchema.index({ pousadaId: 1, processado: 1 });
+emailReservaSchema.index({ pousadaId: 1, messageId: 1 }, { unique: true });
 
 export default mongoose.model('EmailReserva', emailReservaSchema);

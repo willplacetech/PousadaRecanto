@@ -1,7 +1,5 @@
-import { Alerta, CalendarioICal, EmailReserva } from '../models/index.js';
+
 import {
-  verificarSaudeSincronia,
-  verificarSaudeTodas,
   verificarBloqueiosManuaisPendentes,
   listarAlertas,
   resolverAlerta,

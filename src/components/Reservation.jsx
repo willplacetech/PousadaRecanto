@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { MessageCircle, CalendarCheck, CheckCircle2 } from "lucide-react";
@@ -11,7 +11,7 @@ const API = backendUrl ? `${backendUrl}/api` : "";
 const STEPS = [
   "Preencha seus dados ao lado",
   API ? "Sua reserva é registrada na pousada" : "Confira os dados da sua solicitação",
-  "O WhatsApp abre com tudo preenchido — é só enviar",
+  API ? "Aguarde a confirmação da pousada" : "O WhatsApp abre com tudo preenchido — é só enviar",
 ];
 
 const initialForm = {
@@ -34,6 +34,17 @@ export default function Reservation() {
   const [form, setForm] = useState(initialForm);
   const [errors, setErrors] = useState({});
   const [sending, setSending] = useState(false);
+  const [accommodations, setAccommodations] = useState([]);
+  const [accommodationError, setAccommodationError] = useState('');
+  const [result, setResult] = useState(null);
+  useEffect(() => {
+    if (!API) return;
+    axios.get(`${API}/publico/acomodacoes`).then(({ data }) => {
+      setAccommodations(data);
+      setForm(current => ({ ...current, stay_type: data[0]?._id || data[0]?.id || '' }));
+      if (!data.length) setAccommodationError('Nenhuma acomodação disponível para reserva online. Entre em contato pelo WhatsApp.');
+    }).catch(() => setAccommodationError('Não foi possível carregar as acomodações. Tente novamente mais tarde.'));
+  }, []);
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -48,6 +59,7 @@ export default function Reservation() {
     if (!form.checkout) err.checkout = "Escolha a data de check-out.";
     if (form.checkin && form.checkout && form.checkout <= form.checkin)
       err.checkout = "O check-out deve ser após o check-in.";
+    if (API && !accommodations.some(a => (a._id || a.id) === form.stay_type)) err.stay_type = 'Selecione uma acomodação disponível.';
     return err;
   };
 
@@ -61,12 +73,18 @@ export default function Reservation() {
     if (Object.keys(err).length) return;
 
     setSending(true);
+    setResult(null);
     try {
       if (API) {
-        await axios.post(`${API}/reservations`, {
-          ...form,
-          guests: Number(form.guests),
+        const { data } = await axios.post(`${API}/publico/reservas`, {
+          hospede: { nome: form.name, telefone: form.phone },
+          acomodacao: form.stay_type, checkin: form.checkin, checkout: form.checkout,
+          numHospedes: Number(form.guests), observacoes: form.notes,
         });
+        setResult(data);
+        setForm({ ...initialForm, stay_type: form.stay_type });
+        toast.success(`Reserva ${data.reserva.codigo} registrada. Aguarde a confirmação da pousada.`);
+        return;
       }
       const msg = [
         "Olá! Gostaria de fazer uma reserva na Pousada Recanto da Paz.",
@@ -90,7 +108,7 @@ export default function Reservation() {
       setForm(initialForm);
       window.open(buildWhatsAppUrl(msg), "_blank", "noopener,noreferrer");
     } catch (ex) {
-      const detail = ex?.response?.data?.detail;
+      const detail = ex?.response?.data?.mensagem || ex?.response?.data?.erro || ex?.response?.data?.detail;
       toast.error(detail || "Não foi possível registrar a reserva. Tente novamente.");
     } finally {
       setSending(false);
@@ -146,6 +164,8 @@ export default function Reservation() {
             className="rounded-2xl border border-hairline bg-card p-6 shadow-lift md:p-8"
             data-testid="reservation-form"
           >
+            {accommodationError && <p role="alert" className="mb-4 text-sm text-clay">{accommodationError}</p>}
+            {result && <p role="status" className="mb-4 rounded-xl bg-sand p-4 text-sm text-moss">Reserva {result.reserva.codigo} registrada · {Number(result.preco?.total ?? result.reserva.valorTotal).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}. A reserva está pendente e será confirmada pela pousada.</p>}
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-moss" htmlFor="f-name">
@@ -229,11 +249,9 @@ export default function Reservation() {
                   onChange={set("stay_type")}
                   data-testid="form-select-stay"
                 >
-                  <option>Suíte — casal</option>
-                  <option>Suíte — família</option>
-                  <option>Estadia em grupo</option>
-                  <option>Ainda não sei</option>
+                  {API ? <><option value="">Selecione uma acomodação</option>{accommodations.map(a => <option key={a._id || a.id} value={a._id || a.id}>{a.nome} · até {a.maxHospedes} hóspedes</option>)}</> : <><option>Suíte — casal</option><option>Suíte — família</option><option>Estadia em grupo</option><option>Ainda não sei</option></>}
                 </select>
+                {errors.stay_type && <p role="alert" className="mt-1 text-xs text-clay">{errors.stay_type}</p>}
               </div>
 
               <div>
@@ -273,7 +291,7 @@ export default function Reservation() {
 
             <button
               type="submit"
-              disabled={sending}
+              disabled={sending || (API && !accommodations.length)}
               className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-clay px-6 py-4 text-sm font-semibold text-white transition-all hover:bg-claydark hover:shadow-lift disabled:opacity-60"
               data-testid="form-submit-button"
             >
@@ -281,14 +299,14 @@ export default function Reservation() {
                 "Registrando..."
               ) : (
                 <>
-                  <MessageCircle size={17} /> Enviar e confirmar no WhatsApp
+                  <MessageCircle size={17} /> {API ? 'Registrar reserva' : 'Enviar e confirmar no WhatsApp'}
                 </>
               )}
             </button>
 
             <p className="mt-4 text-center text-[11px] leading-relaxed text-fog">
               {API
-                ? "Ao enviar, seus dados ficam registrados com a pousada e o WhatsApp abre com a mensagem pronta. "
+                ? "Ao enviar, sua reserva fica pendente e as datas são bloqueadas. Aguarde a confirmação da pousada. "
                 : "Ao enviar, o WhatsApp abre com a sua solicitação pronta. A reserva será confirmada pela pousada. "}
               {POUSADA.whatsappNumber
                 ? "A mensagem é enviada para o número oficial."

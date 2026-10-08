@@ -1,0 +1,14 @@
+import { Router } from 'express';
+import { cronAuth } from '../middleware/cron.js';
+import { syncLimiter } from '../middleware/rateLimit.js';
+import { sincronizarICal, sincronizarICalTodas } from '../controllers/icalController.js';
+import { sincronizarEmail, sincronizarEmailTodas } from '../controllers/emailController.js';
+import { sincronizarSaude } from '../services/alertaService.js';
+const router = Router();
+router.use(syncLimiter, cronAuth);
+router.post('/ical', (req, res) => req.body.pousadaId ? sincronizarICal(req, res) : sincronizarICalTodas(req, res));
+router.post('/ical/todas', sincronizarICalTodas);
+router.post('/email', (req, res) => req.body.pousadaId ? sincronizarEmail(req, res) : sincronizarEmailTodas(req, res));
+router.post('/email/todas', sincronizarEmailTodas);
+router.post('/saude', sincronizarSaude);
+export default router;

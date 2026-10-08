@@ -1,5 +1,22 @@
-import { Acomodacao, Tarifa } from '../models/index.js';
+import { Acomodacao, Tarifa, Bloqueio, Reserva } from '../models/index.js';
 import mongoose from 'mongoose';
+import { normalizarDia, gerarDatasPeriodo, hojeSaoPaulo } from '../services/datas.js';
+
+const gravarTarifas = async (pousadaId, dados, datas, tarifaId = null) => {
+  const session = await mongoose.startSession();
+  let result;
+  try {
+    await session.withTransaction(async () => {
+      const quarto = await Acomodacao.findOneAndUpdate({ _id: dados.acomodacao, pousadaId }, { $inc: { versaoDisponibilidade: 1 } }, { session, new: true });
+      if (!quarto) throw Object.assign(new Error('Acomodação não encontrada'), { status: 404 });
+      if (dados.bloqueado && (await Bloqueio.exists({ pousadaId, acomodacao: dados.acomodacao, data: { $in: datas } }).session(session) || await Reserva.exists({ pousadaId, acomodacao: dados.acomodacao, status: { $in: ['pendente','confirmada','checkin'] }, checkin: { $lte: datas.at(-1) }, checkout: { $gt: datas[0] } }).session(session))) throw Object.assign(new Error('Uma das noites está reservada; manutenção não aplicada'), { status: 409 });
+      await Tarifa.bulkWrite(datas.map(data => ({ updateOne: { filter: tarifaId ? { _id: tarifaId, pousadaId } : { pousadaId, acomodacao: dados.acomodacao, data }, update: { $set: { acomodacao: dados.acomodacao, data, valor: dados.valor, bloqueado: dados.bloqueado ?? false, motivoBloqueio: dados.motivoBloqueio || '' } }, upsert: !tarifaId } })), { session });
+      result = await Tarifa.find({ pousadaId, acomodacao: dados.acomodacao, data: { $in: datas } }).session(session);
+    });
+    return result;
+  } finally { await session.endSession(); }
+};
+
 
 export const listarAcomodacoes = async (req, res) => {
   try {
@@ -68,15 +85,13 @@ export const atualizarAcomodacao = async (req, res) => {
 
 export const excluirAcomodacao = async (req, res) => {
   try {
-    const acomodacao = await Acomodacao.findOneAndDelete({
-      _id: req.params.id,
-      pousadaId: req.pousadaId
-    });
+    const ocupada = await Bloqueio.exists({ pousadaId: req.pousadaId, acomodacao: req.params.id, data: { $gte: hojeSaoPaulo() } });
+    if (ocupada) return res.status(409).json({ erro: 'Acomodação tem noites ocupadas. Cancele ou transfira as reservas antes de desativar.' });
+    const acomodacao = await Acomodacao.findOneAndUpdate({ _id: req.params.id, pousadaId: req.pousadaId }, { status: 'inativa' }, { new: true });
     if (!acomodacao) {
       return res.status(404).json({ erro: 'Acomodação não encontrada' });
     }
-    await Tarifa.deleteMany({ acomodacao: req.params.id });
-    res.json({ mensagem: 'Acomodação excluída com sucesso' });
+    res.json({ mensagem: 'Acomodação desativada. Histórico preservado.' });
   } catch (error) {
     console.error('Erro ao excluir acomodação:', error);
     res.status(500).json({ erro: 'Erro interno do servidor' });
@@ -106,61 +121,37 @@ export const listarTarifas = async (req, res) => {
 
 export const criarTarifa = async (req, res) => {
   try {
-    const tarifa = new Tarifa({
-      ...req.body,
-      pousadaId: req.pousadaId,
-      data: new Date(req.body.data)
-    });
-    await tarifa.save();
-    res.status(201).json(tarifa);
+    const tarifas = await gravarTarifas(req.pousadaId, req.body, [normalizarDia(req.body.data)]);
+    res.status(201).json(tarifas[0]);
   } catch (error) {
     if (error.code === 11000) {
       return res.status(400).json({ erro: 'Já existe tarifa para esta acomodação nesta data' });
     }
-    console.error('Erro ao criar tarifa:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    res.status(error.status || 500).json({ erro: error.status ? error.message : 'Erro interno do servidor' });
   }
 };
 
 export const criarTarifasLote = async (req, res) => {
   try {
-    const { acomodacao, inicio, fim, valor, bloqueado } = req.body;
-    const inicioDate = new Date(inicio);
-    const fimDate = new Date(fim);
-    const tarifas = [];
-
-    for (let d = new Date(inicioDate); d <= fimDate; d.setDate(d.getDate() + 1)) {
-      tarifas.push({
-        pousadaId: req.pousadaId,
-        acomodacao,
-        data: new Date(d),
-        valor,
-        bloqueado: bloqueado || false
-      });
-    }
-
-    const result = await Tarifa.insertMany(tarifas, { ordered: false });
-    res.status(201).json({ criadas: result.length });
+    const { inicio, fim } = req.body;
+    const datas = gerarDatasPeriodo(inicio, new Date(+normalizarDia(fim) + 86400000));
+    const tarifas = await gravarTarifas(req.pousadaId, req.body, datas);
+    res.status(201).json({ criadas: tarifas.length });
   } catch (error) {
-    console.error('Erro ao criar tarifas em lote:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    res.status(error.status || 500).json({ erro: error.status ? error.message : 'Erro interno do servidor' });
   }
 };
 
 export const atualizarTarifa = async (req, res) => {
   try {
-    const tarifa = await Tarifa.findOneAndUpdate(
-      { _id: req.params.id, pousadaId: req.pousadaId },
-      { ...req.body, data: req.body.data ? new Date(req.body.data) : undefined },
-      { new: true, runValidators: true }
-    );
+    const tarifa = await Tarifa.findOne({ _id: req.params.id, pousadaId: req.pousadaId });
     if (!tarifa) {
       return res.status(404).json({ erro: 'Tarifa não encontrada' });
     }
-    res.json(tarifa);
+    const tarifas = await gravarTarifas(req.pousadaId, req.body, [normalizarDia(req.body.data)], tarifa._id);
+    res.json(tarifas[0]);
   } catch (error) {
-    console.error('Erro ao atualizar tarifa:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    res.status(error.status || 500).json({ erro: error.status ? error.message : 'Erro interno do servidor' });
   }
 };
 

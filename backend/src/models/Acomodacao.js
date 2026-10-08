@@ -10,6 +10,7 @@ const acomodacaoSchema = new mongoose.Schema({
   status: { type: String, enum: ['ativa', 'inativa', 'manutencao'], default: 'ativa' },
   descricao: { type: String, trim: true },
   fotos: [{ type: String }],
+  versaoDisponibilidade: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });

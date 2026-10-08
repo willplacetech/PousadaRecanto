@@ -6,11 +6,12 @@ const connectDB = async () => {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
+      dbName: process.env.MONGODB_DB_NAME || undefined,
     });
     console.log(`MongoDB conectado: ${conn.connection.host}`);
   } catch (error) {
     console.error(`Erro ao conectar MongoDB: ${error.message}`);
-    process.exit(1);
+    throw new Error('Verifique MONGODB_URI e acesso ao MongoDB');
   }
 };
 

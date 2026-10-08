@@ -1,5 +1,5 @@
-import { Reserva, Acomodacao, Tarifa, Bloqueio, Alerta } from '../models/index.js';
-import { validar, schemas } from '../middleware/validacao.js';
+import { Reserva, Acomodacao, Alerta } from '../models/index.js';
+
 import {
   verificarDisponibilidade,
   calcularPrecoPeriodo,
@@ -40,7 +40,7 @@ export const getDisponibilidade = async (req, res) => {
     res.json(resultados);
   } catch (error) {
     console.error('Erro ao buscar disponibilidade:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    res.status(error.status || 500).json({ erro: error.status ? error.message : 'Erro interno do servidor' });
   }
 };
 
@@ -89,8 +89,8 @@ export const criarReservaController = async (req, res) => {
     if (error.message.includes('não comporta')) {
       return res.status(400).json({ erro: error.message });
     }
-    console.error('Erro ao criar reserva:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    if (!error.status) console.error('Erro ao criar reserva:', error.name);
+    res.status(error.status || 500).json({ erro: error.status ? error.message : 'Erro interno do servidor' });
   }
 };
 
@@ -113,7 +113,7 @@ export const confirmarBloqueioManual = async (req, res) => {
     await reserva.save();
 
     await Alerta.findOneAndUpdate(
-      { referencia: reserva._id, tipo: 'bloqueio_manual_pendente', resolvido: false },
+      { pousadaId: req.pousadaId, 'detalhes.reservaId': reserva._id, tipo: 'bloqueio_manual_pendente', resolvido: false },
       { resolvido: true, resolvidoEm: new Date(), resolvidoPor: req.usuario._id }
     );
 
@@ -128,7 +128,7 @@ export const confirmarBloqueioManual = async (req, res) => {
     });
   } catch (error) {
     console.error('Erro ao confirmar bloqueio manual:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    res.status(error.status || 500).json({ erro: error.status ? error.message : 'Erro interno do servidor' });
   }
 };
 
@@ -149,7 +149,7 @@ export const listarReservasController = async (req, res) => {
     });
   } catch (error) {
     console.error('Erro ao listar reservas:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    res.status(error.status || 500).json({ erro: error.status ? error.message : 'Erro interno do servidor' });
   }
 };
 
@@ -163,7 +163,7 @@ export const buscarReserva = async (req, res) => {
     res.json(reserva);
   } catch (error) {
     console.error('Erro ao buscar reserva:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    res.status(error.status || 500).json({ erro: error.status ? error.message : 'Erro interno do servidor' });
   }
 };
 
@@ -173,8 +173,8 @@ export const atualizarStatusReservaController = async (req, res) => {
     const reserva = await atualizarStatusReserva(req.params.id, status, req.pousadaId, req.usuario._id);
     res.json(reserva);
   } catch (error) {
-    console.error('Erro ao atualizar status:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    if (!error.status) console.error('Erro ao atualizar status:', error.name);
+    res.status(error.status || 500).json({ erro: error.status ? error.message : 'Erro interno do servidor' });
   }
 };
 
@@ -185,7 +185,7 @@ export const getCalendario = async (req, res) => {
     res.json(calendario);
   } catch (error) {
     console.error('Erro ao buscar calendário:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    res.status(error.status || 500).json({ erro: error.status ? error.message : 'Erro interno do servidor' });
   }
 };
 
@@ -195,7 +195,7 @@ export const checkOverbooking = async (req, res) => {
     res.json({ alertas, total: alertas.length });
   } catch (error) {
     console.error('Erro ao verificar overbooking:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    res.status(error.status || 500).json({ erro: error.status ? error.message : 'Erro interno do servidor' });
   }
 };
 
@@ -241,6 +241,6 @@ export const listarBloqueiosPendentes = async (req, res) => {
     res.json(reservasComAlerta);
   } catch (error) {
     console.error('Erro ao listar bloqueios pendentes:', error);
-    res.status(500).json({ erro: 'Erro interno do servidor' });
+    res.status(error.status || 500).json({ erro: error.status ? error.message : 'Erro interno do servidor' });
   }
 };
