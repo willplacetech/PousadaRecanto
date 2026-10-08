@@ -1,73 +1,69 @@
 services:
   - type: web
     name: pousada-recanto-backend
-    env: node
+    runtime: node
     plan: free
     region: oregon
-    buildCommand: cd backend && npm install
+    buildCommand: cd backend && npm ci --omit=dev
     startCommand: cd backend && npm start
-    healthCheckPath: /health
+    healthCheckPath: /api/health
     envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 10000
       - key: MONGODB_URI
         sync: false
+      - key: MONGODB_DB_NAME
+        value: pousada_recanto
       - key: JWT_SECRET
+        generateValue: true
+      - key: CRON_SECRET
+        generateValue: true
+      - key: TRUST_PROXY
+        value: "1"
+      - key: POUSADA_PUBLICA_ID
         sync: false
-      - key: JWT_EXPIRES_IN
-        value: 7d
-      - key: RATE_LIMIT_WINDOW_MS
-        value: "900000"
-      - key: RATE_LIMIT_MAX_REQUESTS
-        value: "100"
-      - key: ICAL_TOKEN_SECRET
+      - key: ALLOWED_ORIGINS
         sync: false
+      - key: PUBLIC_API_URL
+        sync: false
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.8-flash
+      - key: WHATSAPP_ENABLED
+        value: "false"
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN
         sync: false
       - key: TWILIO_WHATSAPP_FROM
         sync: false
-      - key: POUSADA_WHATSAPP_TO
-        sync: false
-      - key: EMAIL_IMAP_HOST
-        value: imap.gmail.com
-      - key: EMAIL_IMAP_PORT
-        value: "993"
-      - key: EMAIL_IMAP_USER
-        sync: false
-      - key: EMAIL_IMAP_PASS
-        sync: false
-      - key: EMAIL_FROM
-        sync: false
-      - key: LLM_PROVIDER
-        value: openai
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: OPENAI_MODEL
-        value: gpt-4o-mini
-      - key: FRONTEND_URL
-        sync: false
-      - key: CRON_SECRET
-        sync: false
 
   - type: web
     name: pousada-recanto-frontend
-    env: static
-    plan: free
-    region: oregon
-    buildCommand: npm install && npm run build
+    runtime: static
+    buildCommand: npm ci && npm run build
     staticPublishPath: dist
     envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
       - key: VITE_API_URL
-        value: https://pousada-recanto-backend.onrender.com
+        sync: false
       - key: VITE_WHATSAPP_NUMBER
         sync: false
       - key: VITE_AIRBNB_URL
-        value: https://www.airbnb.com.br
+        sync: false
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
+    headers:
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache
