@@ -13,7 +13,7 @@ import {
 
 const router = Router();
 
-// Export pÃºblico (sem auth, sÃ³ token) - com rate limit
+// Export público (sem auth, só token) - com rate limit
 
 // Rotas autenticadas
 
