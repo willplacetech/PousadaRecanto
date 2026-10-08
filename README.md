@@ -27,7 +27,7 @@ Copie `.env.example` para `.env.local` e preencha os valores desejados:
 
 - `VITE_WHATSAPP_NUMBER`: número oficial com país e DDD, somente dígitos. A referência original não informava um número; sem configuração, o WhatsApp solicita a escolha do contato.
 - `VITE_AIRBNB_URL`: link oficial do anúncio. A referência apontava para a página inicial do Airbnb.
-- `VITE_API_URL`: servidor opcional, sem `/api` no final. Quando configurado, o formulário envia um POST para `/api/reservations` antes de abrir o WhatsApp. O servidor precisa permitir a origem do site via CORS.
+- `VITE_API_URL`: servidor opcional, sem `/api` no final. Quando configurado, o formulário consulta as acomodações e envia a solicitação para `/api/publico/reservas`, exibindo o código e o valor calculados pelo servidor. O servidor precisa permitir a origem do site via CORS. Sem API, o formulário encaminha a solicitação pelo WhatsApp.
 
 Sem servidor configurado, o formulário valida os dados e abre uma solicitação pronta no WhatsApp. Com `VITE_API_URL`, consulta as acomodações cadastradas e registra uma reserva pendente pela API pública em `/api/publico/reservas`, com preço calculado no servidor. A confirmação continua a depender da pousada.
 
