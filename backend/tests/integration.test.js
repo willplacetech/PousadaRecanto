@@ -147,6 +147,18 @@ describe('API integrada com replica set efêmero', () => {
     const r = await request(app).post('/api/tarifas').set(auth()).send({ acomodacao: String(quarto._id), data: '2027-01-10', valor: 100 });
     expect(r.status).toBe(404); expect(await Tarifa.countDocuments()).toBe(0);
   });
+  it('exportação iCal exige token e mantém UID sem expor hóspede', async () => {
+    await request(app).post('/api/publico/reservas').send(body());
+    const url = `/api/ical/${p._id}/${quarto._id}.ics`;
+    expect((await request(app).get(url)).status).toBe(404);
+    const a = await request(app).get(url).query({ token:p.icalToken });
+    const b = await request(app).get(url).query({ token:p.icalToken });
+    expect(a.status).toBe(200); expect(a.text).not.toContain('Ana Teste');
+    expect(a.text.match(/^UID:.*$/gm)).toEqual(b.text.match(/^UID:.*$/gm));
+    expect(a.text).toContain('DTSTART;VALUE=DATE:20270110');
+    expect(a.text).not.toContain('DTSTART;VALUE=DATE:20270112');
+    expect((await Pousada.findById(p._id)).ultimoPullIcal).toBeInstanceOf(Date);
+  });
   it('manutenção recusa noite reservada e exclusão preserva referência da acomodação', async () => {
     await request(app).post('/api/publico/reservas').send(body());
     const r = await request(app).post('/api/tarifas').set(auth()).send({ acomodacao: String(quarto._id), data: '2027-01-10', valor: 100, bloqueado: true });

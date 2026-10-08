@@ -30,6 +30,7 @@ async function login(page) {
 }
 test('login, manual blocking, create reservation and navigate management', async ({ page }) => {
   const calls = await api(page); await login(page);
+  await page.screenshot({ path:'artifacts/painel-desktop.png', fullPage:true });
   await page.getByRole('button', { name: 'Confirmar bloqueio' }).click();
   expect(calls.some(c => c.path === '/api/reservas/r1/bloqueio-manual' && c.method === 'PATCH')).toBeTruthy();
   await page.getByRole('link', { name: 'Reservas', exact: true }).click();
@@ -182,4 +183,22 @@ test('a delayed response from a previous session never populates a new session',
   release(); await oldResponse;
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(page.getByText('Hóspede privado A')).toHaveCount(0);
+});
+
+test('production PWA provides offline screen and keeps private responses out of cache', async ({ page, context }) => {
+  const origin = 'http://127.0.0.1:5190';
+  const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js','preview','--host','127.0.0.1','--port','5190','--strictPort'], { stdio:'ignore' });
+  try {
+    await expect.poll(async () => { try { return (await page.request.get(origin)).ok(); } catch { return false; } }, {timeout:15000}).toBeTruthy();
+    await page.goto(`${origin}/painel`);
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.reload();
+    await page.evaluate(() => fetch('/api/private-probe', {headers:{Authorization:'Bearer test-only'}}));
+    const cached = await page.evaluate(async () => (await Promise.all((await caches.keys()).map(async k => (await (await caches.open(k)).keys()).map(r => new URL(r.url).pathname)))).flat());
+    expect(cached).toContain('/offline.html');
+    expect(cached.some(p => p.startsWith('/api/') || p.startsWith('/painel'))).toBe(false);
+    await context.setOffline(true);
+    await page.goto(`${origin}/painel`);
+    await expect(page.getByRole('heading', {name:'Vamos reconectar.'})).toBeVisible();
+  } finally { await context.setOffline(false); server.kill(); }
 });
