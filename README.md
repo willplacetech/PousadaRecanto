@@ -29,7 +29,13 @@ Copie `.env.example` para `.env.local` e preencha os valores desejados:
 - `VITE_AIRBNB_URL`: link oficial do anúncio. A referência apontava para a página inicial do Airbnb.
 - `VITE_API_URL`: servidor opcional, sem `/api` no final. Quando configurado, o formulário envia um POST para `/api/reservations` antes de abrir o WhatsApp. O servidor precisa permitir a origem do site via CORS.
 
-Sem servidor configurado, o formulário valida os dados e abre uma solicitação pronta no WhatsApp. Ele não registra nem confirma reservas automaticamente. A confirmação depende da pousada. O backend da Emergent não faz parte dos arquivos recuperados.
+Sem servidor configurado, o formulário valida os dados e abre uma solicitação pronta no WhatsApp. Com `VITE_API_URL`, consulta as acomodações cadastradas e registra uma reserva pendente pela API pública em `/api/publico/reservas`, com preço calculado no servidor. A confirmação continua a depender da pousada.
+
+## Gestão da pousada
+
+O painel em `/painel` inclui login, alertas e bloqueio manual, reservas, calendário por canal, acomodações, tarifas, iCal, e-mail com Gemini e configurações. O backend está em `backend/` e usa MongoDB com replica set. A PWA oferece instalação e página offline; operações de gestão exigem conexão.
+
+Veja [as instruções de primeiro acesso, cron e publicação](docs/operacao.md). Elas explicam como provisionar o dono, configurar credenciais reais e habilitar a reserva pública. `npm run backend:dev` inicia a API; `npm run dev` inicia o frontend.
 
 Reinicie o Vite após alterar as variáveis. Elas são públicas e não devem conter segredos.
 
@@ -40,7 +46,7 @@ npm run build
 npm run test:e2e
 ```
 
-Os testes usam Google Chrome instalado. Verificam fotos e fontes locais, galeria, validação do formulário, preparação da mensagem do WhatsApp e menu no celular. Eles não enviam mensagens nem registram reservas reais.
+Os testes usam Google Chrome instalado. Verificam o site, o painel e a integração pública com API controlada, sem enviar mensagens nem registrar reservas em contas reais. Em `backend`, `npm test` verifica também transações com um MongoDB replica set temporário; `npm run lint` confere o código da API.
 
 ## Arquivos de referência
 

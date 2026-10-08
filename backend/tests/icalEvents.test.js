@@ -1,11 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { parseCalendar, publicAddress, validateCalendarUrl } from '../src/services/icalEvents.js';
+import { execFileSync } from 'node:child_process';
 
 const calendar = (events = '') => `BEGIN:VCALENDAR\r\nVERSION:2.0\r\n${events}END:VCALENDAR\r\n`;
 const event = (extra = '') => `BEGIN:VEVENT\r\nUID:ota-1\r\nDTSTART;VALUE=DATE:20261010\r\nDTEND;VALUE=DATE:20261012\r\nSUMMARY:BLOCKED\r\n${extra}END:VEVENT\r\n`;
 describe('iCal civil nights and safe snapshots', () => {
   it('includes external blocked events and excludes checkout', () => {
     expect(parseCalendar(calendar(event())).map(b => b.data.toISOString())).toEqual(['2026-10-10T00:00:00.000Z', '2026-10-11T00:00:00.000Z']);
+  });
+  it('keeps all-day civil dates when server timezone is Sao Paulo', () => {
+    const source = `import {parseCalendar} from './src/services/icalEvents.js'; process.stdout.write(JSON.stringify(parseCalendar(${JSON.stringify(calendar(event()))}).map(b=>b.data.toISOString())));`;
+    const result = execFileSync(process.execPath, ['--input-type=module','-e',source], { encoding: 'utf8', env: { ...process.env, TZ:'America/Sao_Paulo' } });
+    expect(JSON.parse(result)).toEqual(['2026-10-10T00:00:00.000Z', '2026-10-11T00:00:00.000Z']);
   });
   it('keeps event identity for two events on the same night', () => {
     const blocks = parseCalendar(calendar(event() + event().replace('ota-1', 'ota-2')));
