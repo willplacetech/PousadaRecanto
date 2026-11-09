@@ -24,20 +24,20 @@ export default function About() {
               className="mt-7 leading-relaxed text-moss"
               data-testid="about-text-1"
             >
-              A Pousada Recanto da Paz fica em Lindoia, no Circuito das √Åguas
-              Paulista ‚Äî um convite a dias mais lentos. Aqui o dia come√ßa com o
-              canto dos p√°ssaros, tem piscina ao ar livre, jardim e terra√ßo
+              A Pousada Recanto da Paz fica em Lindoia, no Circuito das ¡guas
+              Paulista ó um convite a dias mais lentos. Aqui o dia comeÁa com o
+              canto dos p·ssaros, tem piscina ao ar livre, jardim e terraÁo
               ensolarado para recarregar as energias.
             </p>
             <p className="mt-5 leading-relaxed text-moss" data-testid="about-text-2">
-              Su√≠tes com ar-condicionado, Wi-Fi gratuito, estacionamento
-              privativo e √°rea de refei√ß√µes ao ar livre com churrasqueira para
-              aqueles almo√ßos que se esticam at√© o fim da tarde.
+              SuÌtes com ar-condicionado, Wi-Fi gratuito, estacionamento
+              privativo e ¡rea de refeiÁıes ao ar livre com churrasqueira para
+              aqueles almoÁos que se esticam atÈ o fim da tarde.
             </p>
           </Reveal>
           <Reveal delay={0.2}>
             <div className="mt-8 flex flex-wrap gap-2">
-              {["Check-in 14h", "Check-out at√© 12h", "Seguran√ßa 24h"].map(
+              {["Check-in 14h", "Check-out atÈ 12h", "SeguranÁa 24h"].map(
                 (pill) => (
                   <span
                     key={pill}
@@ -65,8 +65,8 @@ export default function About() {
           <Reveal delay={0.25} className="mt-5 grid grid-cols-2 gap-5">
             <div className="overflow-hidden rounded-2xl shadow-soft">
               <img
-                src="/photos/gmap_1.jpg"
-                alt="Piscina da pousada ‚Äî foto oficial do Google Maps"
+                src={GALLERY[0].src}
+                alt={GALLERY[0].alt}
                 className="h-[160px] w-full object-cover transition-transform duration-700 hover:scale-105 md:h-[220px]"
                 data-testid="about-img-pool"
               />
@@ -81,7 +81,7 @@ export default function About() {
             </div>
           </Reveal>
           <p className="mt-3 text-right text-[11px] text-fog">
-            Fotos oficiais da pousada (Google Maps)
+            Fotos oficiais da pousada
           </p>
         </div>
       </div>
