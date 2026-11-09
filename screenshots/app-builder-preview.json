@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Pousada Recanto da Paz — Lindóia, SP",
+      "hasCanvas": false,
+      "bodyTextLen": 3206,
+      "bodyTextHash": "938a8050243f732505f215eb12b5463eb0b41d01f9569b25b79ba451fe22882f",
+      "bodyTextPrefix": "Recanto da Paz A pousada Estadias Comodidades Galeria Como chega",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Pousada Recanto da Paz — Lindóia, SP",
+      "hasCanvas": false,
+      "bodyTextLen": 3146,
+      "bodyTextHash": "849d189b99cdef858b07b575afff3915fcceb4eb2c2f6049d8681d95cb585b1b",
+      "bodyTextPrefix": "Recanto da Paz POUSADA · LINDÓIA, SP Recanto da Paz Piscina com ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

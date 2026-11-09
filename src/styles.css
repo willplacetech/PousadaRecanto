@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", Georgia, serif;
+  --color-sand: #f8f6f0;
+  --color-linen: #e8e1d5;
+  --color-card: #fffdf9;
+  --color-pine: #18221b;
+  --color-ink: #1c2520;
+  --color-moss: #526056;
+  --color-fog: #8a978e;
+  --color-sage: #5c745d;
+  --color-clay: #c86d51;
+  --color-claydark: #a95540;
+  --color-hairline: #e5dfd3;
+  --shadow-soft: 0 10px 30px rgb(28 37 32 / 0.06);
+  --shadow-lift: 0 18px 50px rgb(28 37 32 / 0.14);
+  --radius-card: 1.25rem;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background: var(--color-sand);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  section[id] {
+    scroll-margin-top: 5.25rem;
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 70s linear infinite;
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s ease;
+}
+
+.reveal-on {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .animate-marquee,
+  .reveal {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
