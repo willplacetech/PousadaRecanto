@@ -18,7 +18,7 @@ export const OTA = {
     "https://www.booking.com/hotel/br/pousada-recanto-da-paz-lindoia-sp.pt-br.html",
 };
 
-export const HERO_IMG = "/photos/main_streetview.jpg";
+export const HERO_IMG = "/photos/booking_1.jpg";
 
 export const GALLERY = [
   {
